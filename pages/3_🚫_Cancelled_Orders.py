@@ -71,6 +71,12 @@ def load_data(url: str) -> pd.DataFrame:
     return type_columns(df, currency_hints=CURRENCY_COL_HINTS)
 
 
+def get_month_label(series: pd.Series) -> pd.Series:
+    """Return month labels from a date-like series in calendar order."""
+    dates = pd.to_datetime(series, errors="coerce", dayfirst=True)
+    return dates.dt.strftime("%b")
+
+
 st.title("🚫 Cancelled Orders")
 st.caption("Rows from the dispatch tracker whose remarks match a configured cancel reason.")
 
@@ -128,6 +134,41 @@ pattern = "|".join(re.escape(t) for t in all_terms)
 mask = df[cancel_col].astype(str).str.contains(pattern, case=False, na=False, regex=True)
 cancelled = df[mask].copy()
 
+# ------------------------------------------------------------
+# MONTH FILTER
+# ------------------------------------------------------------
+date_col = next(
+    (
+        c for c in ["Order Received Date", "Order Upload date", "Invoice Date", "Dispatch Date"]
+        if c in cancelled.columns
+    ),
+    None,
+)
+
+if date_col:
+    cancelled["__Month"] = get_month_label(cancelled[date_col])
+    month_order = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    available_months = [
+        m for m in month_order
+        if m in cancelled["__Month"].dropna().unique()
+    ]
+
+    with st.expander("🔎 Filters", expanded=False):
+        selected_months = st.multiselect(
+            "Month",
+            available_months,
+            default=available_months,
+            key="cancelled_month_filter",
+        )
+
+    if selected_months:
+        cancelled = cancelled[cancelled["__Month"].isin(selected_months)].copy()
+    else:
+        st.warning("No months selected — no cancelled orders will be shown.")
+else:
+    st.caption("Month filter unavailable — no supported date column was found.")
+
 st.caption(f"Matching terms: {', '.join(all_terms)}")
 
 # ------------------------------------------------------------
@@ -144,7 +185,7 @@ if value_col:
 # ------------------------------------------------------------
 # RESULTS TABLE
 # ------------------------------------------------------------
-all_cols = list(df.columns)
+all_cols = [c for c in df.columns if c != "__Month"]
 default_cols = [c for c in CONFIG["default_visible_columns"] if c in all_cols] or all_cols[:8]
 with st.expander("Columns to show"):
     visible_cols = st.multiselect(
