@@ -299,7 +299,12 @@ with st.expander("🔎 Filters", expanded=False):
     # column actually exists, instead of assuming it's always there.
     f1, f2, f3 = st.columns(3)
     with f1:
-        selected_months = st.multiselect("Month", sheets_used, default=sheets_used)
+        selected_months = st.multiselect(
+            "Month (multi-select)",
+            sheets_used,
+            default=sheets_used,
+            key="fill_rate_month_filter",
+        )
     with f2:
         selected_categories = st.multiselect("Category", sorted(df[CONFIG["category"]].dropna().astype(str).unique()))
     with f3:
@@ -333,27 +338,19 @@ if filtered.empty:
     st.stop()
 
 available = sorted(sheets_used, key=month_key)
-
-# Current/Previous month are always the two most recent months in the
-# actual workbook (e.g. Aug/Jul), regardless of what's picked in the
-# Month filter above — the Month filter only narrows the MOM table/
-# charts and category tab below. Category/Customer/Channel/Zone/Name
-# filters still apply to this comparison; only the Month checkbox list
-# doesn't.
-non_month_filtered = df.copy()
-for col, vals in active_filter_cols:
-    if vals:
-        non_month_filtered = non_month_filtered[non_month_filtered[col].astype(str).isin(vals)]
-
-current_month = available[-1]
+selected_sorted = sorted(filtered.Month.dropna().unique(), key=month_key)
+current_month = selected_sorted[-1]
 current_idx = available.index(current_month)
 previous_month = available[current_idx - 1] if current_idx > 0 else None
-current_df = non_month_filtered[non_month_filtered.Month == current_month]
-previous_df = non_month_filtered[non_month_filtered.Month == previous_month] if previous_month else pd.DataFrame()
+current_df = filtered[filtered.Month == current_month]
+previous_df = filtered[filtered.Month == previous_month] if previous_month else pd.DataFrame()
 
 # YTD always starts from the first available month and ends at the current month. Month filter does not truncate YTD.
 ytd_months = available[:current_idx + 1]
-ytd_df = non_month_filtered[non_month_filtered.Month.isin(ytd_months)].copy()
+ytd_df = df[df.Month.isin(ytd_months)].copy()
+for col, vals in active_filter_cols:
+    if vals:
+        ytd_df = ytd_df[ytd_df[col].astype(str).isin(vals)]
 
 cur = summarize(current_df)
 prev = summarize(previous_df) if not previous_df.empty else None
@@ -408,7 +405,8 @@ with tab_mom:
         "Order Value": "order_value", "Invoice Value": "invoice_value", "Fill Rate — Value": "fr_value",
         "Pending Value": "pending_value", "Sale Loss": "sale_loss",
     }
-    md = monthly[["Month"] + list(mom_map.values())].rename(columns={v: k for k, v in mom_map.items()})
+    selected_cols = st.multiselect("Choose columns", list(mom_map), default=list(mom_map), key="mom_cols") or list(mom_map)
+    md = monthly[["Month"] + [mom_map[x] for x in selected_cols]].rename(columns={v: k for k, v in mom_map.items()})
     for col in md.columns:
         if col == "Month":
             continue
@@ -423,17 +421,15 @@ with tab_mom:
     st.dataframe(md, use_container_width=True, hide_index=True)
 
     st.markdown('<div class="section-title">Fill Rate — Qty vs Value</div>', unsafe_allow_html=True)
-    qv_bar = alt.Chart(fr).mark_bar().encode(
-        x=alt.X("Month:N", sort=available, title="Month", axis=alt.Axis(labelAngle=0)),
-        xOffset="Metric:N", y=alt.Y("Fill Rate:Q", title="Fill Rate (%)"),
-        color=alt.Color("Metric:N", title="Metric"),
-        tooltip=["Month", "Metric", alt.Tooltip("Fill Rate:Q", format=".1f")],
-    ).properties(height=350)
-    qv_labels = alt.Chart(fr).mark_text(dy=-6, fontWeight="bold").encode(
-        x=alt.X("Month:N", sort=available), xOffset="Metric:N", y="Fill Rate:Q",
-        text=alt.Text("Fill Rate:Q", format=".1f"),
+    st.altair_chart(
+        alt.Chart(fr).mark_bar().encode(
+            x=alt.X("Month:N", sort=available, title="Month", axis=alt.Axis(labelAngle=0)),
+            xOffset="Metric:N", y=alt.Y("Fill Rate:Q", title="Fill Rate (%)"),
+            color=alt.Color("Metric:N", title="Metric"),
+            tooltip=["Month", "Metric", alt.Tooltip("Fill Rate:Q", format=".1f")],
+        ).properties(height=350),
+        use_container_width=True,
     )
-    st.altair_chart(qv_bar + qv_labels, use_container_width=True)
 
     st.markdown('<div class="section-title">Sale Loss MOM</div>', unsafe_allow_html=True)
     sl = alt.Chart(monthly).mark_bar().encode(
@@ -447,20 +443,10 @@ with tab_mom:
 
 with tab_customer:
     st.markdown('<div class="section-title">Customer Wise Performance</div>', unsafe_allow_html=True)
-    st.markdown('<div class="dashboard-subtitle">Customer-level performance. Select a customer below to open order-level details.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="dashboard-subtitle">Customer-level performance for the selected month(s). Select a customer below to open order-level details.</div>', unsafe_allow_html=True)
 
-    cust_month_col, cust_search_col = st.columns([1, 2])
-    with cust_month_col:
-        # Independent of the global Month filter above — lets you check
-        # any single month's customer performance without changing what
-        # the rest of the page (MOM trend, category tab) is showing.
-        cust_month_choice = st.selectbox("Month", ["All"] + available, key="customer_month_filter")
-    customer_scoped = filtered if cust_month_choice == "All" else filtered[filtered.Month == cust_month_choice]
-
-    with cust_search_col:
-        search = st.text_input("🔍 Search Customer", key="customer_search")
-
-    cs = customer_summary(customer_scoped)
+    cs = customer_summary(filtered)
+    search = st.text_input("🔍 Search Customer", key="customer_search")
     if search:
         cs = cs[cs[CONFIG["customer"]].astype(str).str.contains(search, case=False, na=False)]
 
@@ -469,7 +455,7 @@ with tab_customer:
         key="customer_detail_choice",
     )
     if customer_choice != "Select a customer":
-        show_customer_details(customer_choice, customer_scoped)
+        show_customer_details(customer_choice, filtered)
 
     cd = cs.copy()
     cd["Order (count)"] = cd.order_count.map(fmt_num)
@@ -489,21 +475,7 @@ with tab_category:
     st.markdown('<div class="section-title">Category Wise Performance</div>', unsafe_allow_html=True)
     st.markdown('<div class="dashboard-subtitle">Category-level order, invoice, fill rate and sale loss performance.</div>', unsafe_allow_html=True)
 
-    # Normalize blank-like category values (NaN, "", "None", "nan", plain
-    # whitespace) into one label BEFORE grouping, not after. Grouping
-    # first and relabeling afterwards let NaN and "" form two separate
-    # groups that only looked identical once both got renamed to
-    # "Blank / Not Available" — showing as two duplicate blank rows in
-    # the table below. Normalizing first means there's at most one such
-    # row, and only when the data actually has blank categories.
-    category_col = CONFIG["category"]
-    cat_key = filtered[category_col].astype(str).str.strip()
-    is_blank = filtered[category_col].isna() | cat_key.isin(["", "nan", "none", "n/a"]) | (cat_key.str.lower().isin(["nan", "none", "n/a"]))
-    cat_key = cat_key.mask(is_blank, "Blank / Not Available")
-    work = filtered.copy()
-    work[category_col] = cat_key
-
-    cat = work.groupby(category_col, dropna=False).agg(
+    cat = filtered.groupby(CONFIG["category"], dropna=False).agg(
         orders=(CONFIG["order_id"], "nunique"), order_qty=(CONFIG["order_qty"], "sum"),
         invoice_qty=(CONFIG["invoice_qty"], "sum"), order_value=(CONFIG["order_value"], "sum"),
         invoice_value=(CONFIG["invoice_value"], "sum"), sale_loss=(CONFIG["sale_loss"], "sum"),
@@ -512,6 +484,10 @@ with tab_category:
     cat["fr_value"] = np.where(cat.order_value != 0, cat.invoice_value / cat.order_value * 100, np.nan)
     cat["pending_qty"] = cat.order_qty - cat.invoice_qty
     cat["pending_value"] = cat.order_value - cat.invoice_value
+    cat[CONFIG["category"]] = (
+        cat[CONFIG["category"]].fillna("Blank / Not Available").astype(str)
+        .replace({"None": "Blank / Not Available", "nan": "Blank / Not Available", "": "Blank / Not Available"})
+    )
 
     cd = cat[[CONFIG["category"], "orders", "order_qty", "invoice_qty", "fr_qty", "fr_value",
               "pending_qty", "order_value", "invoice_value", "pending_value", "sale_loss"]].rename(columns={
