@@ -1,25 +1,14 @@
 """
 STOCK GAP DASHBOARD
 ------------------------------------------------------------
-Matches an Order sheet against a live Stock workbook (read straight
-from a SharePoint/OneDrive share link — no upload needed) and shows
+Matches an Order sheet against the live Stock workbook and shows
 exactly where orders exceed available stock.
 
-The order sheet can come from either source:
-  - Live link  (STOCK_ORDER_EXCEL_URL in Secrets) — same "always
-    current" behavior as the stock workbook.
-  - Upload     — for a one-off file, or while STOCK_ORDER_EXCEL_URL
-    isn't set up yet.
+The order sheet is upload-only (.xlsx/.xls/.csv). No live order-sheet
+link is used on this page.
 
-Ported from the original browser-only HTML tool. That version needed
-someone to manually upload the stock file each time and "publish" it
-for the team; since the stock file is now a live link, that admin/
-publish step is gone — this page just always reads the current file.
-
-SETUP: add two links to this app's Secrets —
-    STOCK_EXCEL_URL       -> the stock workbook (multi-sheet, required)
-    STOCK_ORDER_EXCEL_URL -> the order sheet to check against stock
-                              (optional — without it, use the upload option)
+SETUP: add one link to this app's Secrets —
+    STOCK_EXCEL_URL -> the stock workbook (multi-sheet, required)
 
 CONFIG below controls sheet names / column mapping for the STOCK
 workbook — edit this block directly if sheet names or columns ever
@@ -164,15 +153,6 @@ def load_stock(url: str) -> pd.DataFrame:
     return result
 
 
-@st.cache_data(ttl=300, show_spinner="Fetching latest order sheet…")
-def load_orders(url: str, header_row: int) -> pd.DataFrame:
-    """Live-link counterpart to parse_uploaded_orders() below."""
-    raw = fetch_bytes(url)
-    odf = pd.read_excel(io.BytesIO(raw), header=header_row - 1)
-    odf.columns = [str(c).strip() for c in odf.columns]
-    return odf
-
-
 def parse_uploaded_orders(file_bytes: bytes, filename: str, header_row: int) -> pd.DataFrame:
     """Parse an uploaded order file (.xlsx/.xls/.csv) using a user-chosen header row."""
     hdr_idx = header_row - 1
@@ -185,11 +165,9 @@ def parse_uploaded_orders(file_bytes: bytes, filename: str, header_row: int) -> 
 
 
 st.title("📉 Stock Gap Dashboard")
-st.caption("Matches an order sheet against live stock. Order sheet can be read live or uploaded.")
+st.caption("Matches an uploaded order sheet against the live stock workbook.")
 
 stock_url = get_secret("STOCK_EXCEL_URL")
-order_url = get_secret("STOCK_ORDER_EXCEL_URL")
-
 if not stock_url:
     st.error("Missing link. Add **STOCK_EXCEL_URL** to this app's Secrets.")
     st.stop()
@@ -198,7 +176,6 @@ top_l, top_r = st.columns([5, 1])
 with top_r:
     if st.button("🔄 Refresh Now", use_container_width=True):
         load_stock.clear()
-        load_orders.clear()
         st.rerun()
 
 try:
@@ -208,54 +185,42 @@ except FetchError as e:
     st.stop()
 
 # ------------------------------------------------------------
-# ORDER SHEET SOURCE — live link (if STOCK_ORDER_EXCEL_URL is set)
-# or upload, either way with a user-adjustable header row.
+# ORDER SHEET SOURCE — upload only
 # ------------------------------------------------------------
 st.markdown("#### Order Sheet")
+st.caption("Upload the order file to compare against the current stock workbook. Live order links are disabled.")
 
-source_options = ["Live link", "Upload file"] if order_url else ["Upload file"]
-if not order_url:
-    st.caption(
-        "Tip: add **STOCK_ORDER_EXCEL_URL** to Secrets to read the order sheet "
-        "live too, the same way the stock workbook is read, instead of "
-        "uploading it each time."
+up_col1, up_col2 = st.columns([3, 1])
+with up_col1:
+    uploaded_order_file = st.file_uploader(
+        "Choose order file (.xlsx / .xls / .csv)",
+        type=["xlsx", "xls", "csv"],
+        key="order_upload",
     )
-order_source = st.radio("Order sheet source", source_options, horizontal=True, key="order_source")
-
-order_df = None
-order_source_label = ""
-
-if order_source == "Live link":
+with up_col2:
     header_row = st.number_input(
-        "Header row #", min_value=1, value=CONFIG["order_header_row"], step=1, key="order_header_row_live"
+        "Header row #",
+        min_value=1,
+        value=CONFIG["order_header_row"],
+        step=1,
+        key="order_header_row_upload",
     )
-    try:
-        order_df = load_orders(order_url, int(header_row))
-    except FetchError as e:
-        st.error(f"Could not load the live order file: {e}")
-        st.stop()
-    order_source_label = "Live link"
-else:
-    up_col1, up_col2 = st.columns([3, 1])
-    with up_col1:
-        uploaded_order_file = st.file_uploader(
-            "Choose order file (.xlsx / .xls / .csv)", type=["xlsx", "xls", "csv"], key="order_upload"
-        )
-    with up_col2:
-        header_row = st.number_input(
-            "Header row #", min_value=1, value=CONFIG["order_header_row"], step=1, key="order_header_row_upload"
-        )
 
-    if uploaded_order_file is None:
-        st.info("Upload an order sheet to continue.")
-        st.stop()
+if uploaded_order_file is None:
+    st.info("Upload an order sheet to continue.")
+    st.stop()
 
-    try:
-        order_df = parse_uploaded_orders(uploaded_order_file.getvalue(), uploaded_order_file.name, int(header_row))
-    except Exception as e:
-        st.error(f"Could not parse the uploaded order file: {e}")
-        st.stop()
-    order_source_label = f"Uploaded file → `{uploaded_order_file.name}`"
+try:
+    order_df = parse_uploaded_orders(
+        uploaded_order_file.getvalue(),
+        uploaded_order_file.name,
+        int(header_row),
+    )
+except Exception as e:
+    st.error(f"Could not parse the uploaded order file: {e}")
+    st.stop()
+
+order_source_label = f"Uploaded file → `{uploaded_order_file.name}`"
 
 if stock_df.empty:
     st.warning("No stock rows loaded — check CONFIG sheet names/columns still match the live workbook.")
