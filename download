@@ -1,0 +1,8 @@
+# Never commit real Streamlit secrets — this is a template repo only.
+.streamlit/secrets.toml
+
+__pycache__/
+*.pyc
+.venv/
+.env
+.DS_Store
