@@ -1,4 +1,4 @@
-"""
+
 FILL RATE — month-on-month dashboard
 ------------------------------------------------------------
 Reads the same live dispatch tracker workbook as the other pages
@@ -293,34 +293,6 @@ if missing:
     st.error("Missing required columns: " + ", ".join(missing))
     st.stop()
 
-with st.expander("🔎 Filters", expanded=False):
-    # Channel/Zone/Name are optional — some workbooks won't have them,
-    # so each filter is only shown (and only ever indexed) when its
-    # column actually exists, instead of assuming it's always there.
-    f1, f2, f3 = st.columns(3)
-    with f1:
-        selected_months = st.multiselect(
-            "Month (multi-select)",
-            sheets_used,
-            default=sheets_used,
-            key="fill_rate_month_filter",
-        )
-    with f2:
-        selected_categories = st.multiselect("Category", sorted(df[CONFIG["category"]].dropna().astype(str).unique()))
-    with f3:
-        selected_customers = st.multiselect("Customer", sorted(df[CONFIG["customer"]].dropna().astype(str).unique()))
-
-    f4, f5, f6 = st.columns(3)
-    optional_filters = [("channel", "Channel", f4), ("zone", "Zone", f5), ("name", "Name", f6)]
-    selected_optional = {}
-    for key, label, col in optional_filters:
-        cname = CONFIG[key]
-        with col:
-            if cname in df.columns:
-                selected_optional[cname] = st.multiselect(label, sorted(df[cname].dropna().astype(str).unique()))
-            else:
-                st.caption(f"_{label} column not found — filter unavailable._")
-
 filtered = df.copy()
 if selected_months:
     filtered = filtered[filtered.Month.isin(selected_months)]
@@ -375,6 +347,30 @@ if prev is not None:
     st.dataframe(comparison_table(cur, prev, ytd), use_container_width=True, hide_index=True, height=335)
 else:
     st.info("A previous month is required for comparison.")
+
+with st.expander("🔎 Filters", expanded=False):
+    # Channel/Zone/Name are optional — some workbooks won't have them,
+    # so each filter is only shown (and only ever indexed) when its
+    # column actually exists, instead of assuming it's always there.
+    f1, f2, f3 = st.columns(3)
+    with f1:
+        selected_months = st.multiselect("Month", sheets_used, default=sheets_used)
+    with f2:
+        selected_categories = st.multiselect("Category", sorted(df[CONFIG["category"]].dropna().astype(str).unique()))
+    with f3:
+        selected_customers = st.multiselect("Customer", sorted(df[CONFIG["customer"]].dropna().astype(str).unique()))
+
+    f4, f5, f6 = st.columns(3)
+    optional_filters = [("channel", "Channel", f4), ("zone", "Zone", f5), ("name", "Name", f6)]
+    selected_optional = {}
+    for key, label, col in optional_filters:
+        cname = CONFIG[key]
+        with col:
+            if cname in df.columns:
+                selected_optional[cname] = st.multiselect(label, sorted(df[cname].dropna().astype(str).unique()))
+            else:
+                st.caption(f"_{label} column not found — filter unavailable._")
+
 
 tab_mom, tab_customer, tab_category = st.tabs(["📈 MOM Overview", "🏪 Customer Wise", "📦 Category Wise"])
 
@@ -443,7 +439,7 @@ with tab_mom:
 
 with tab_customer:
     st.markdown('<div class="section-title">Customer Wise Performance</div>', unsafe_allow_html=True)
-    st.markdown('<div class="dashboard-subtitle">Customer-level performance for the selected month(s). Select a customer below to open order-level details.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="dashboard-subtitle">Customer-level performance. Select a customer below to open order-level details.</div>', unsafe_allow_html=True)
 
     cs = customer_summary(filtered)
     search = st.text_input("🔍 Search Customer", key="customer_search")
