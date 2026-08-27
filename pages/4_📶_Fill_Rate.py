@@ -1,4 +1,4 @@
-
+"""
 FILL RATE — month-on-month dashboard
 ------------------------------------------------------------
 Reads the same live dispatch tracker workbook as the other pages
@@ -293,6 +293,19 @@ if missing:
     st.error("Missing required columns: " + ", ".join(missing))
     st.stop()
 
+# Read filter selections from session state so the filter controls can be
+# displayed below the YTD comparison table while their current selections
+# are still applied to the dashboard above and below them.
+selected_months = st.session_state.get("selected_months", sheets_used)
+selected_categories = st.session_state.get("selected_categories", [])
+selected_customers = st.session_state.get("selected_customers", [])
+selected_optional = {}
+for key in ["channel", "zone", "name"]:
+    cname = CONFIG[key]
+    state_key = f"selected_{key}"
+    if cname in df.columns:
+        selected_optional[cname] = st.session_state.get(state_key, [])
+
 filtered = df.copy()
 if selected_months:
     filtered = filtered[filtered.Month.isin(selected_months)]
@@ -349,28 +362,44 @@ else:
     st.info("A previous month is required for comparison.")
 
 with st.expander("🔎 Filters", expanded=False):
-    # Channel/Zone/Name are optional — some workbooks won't have them,
-    # so each filter is only shown (and only ever indexed) when its
-    # column actually exists, instead of assuming it's always there.
+    # These filters are intentionally displayed after the YTD comparison table
+    # and before the MOM / Customer Wise / Category Wise sections.
+    # Their values are stored in session state so the selections continue to
+    # drive the dashboard on the next Streamlit rerun.
     f1, f2, f3 = st.columns(3)
     with f1:
-        selected_months = st.multiselect("Month", sheets_used, default=sheets_used)
+        st.multiselect(
+            "Month", sheets_used,
+            default=st.session_state.get("selected_months", sheets_used),
+            key="selected_months",
+        )
     with f2:
-        selected_categories = st.multiselect("Category", sorted(df[CONFIG["category"]].dropna().astype(str).unique()))
+        st.multiselect(
+            "Category", sorted(df[CONFIG["category"]].dropna().astype(str).unique()),
+            default=st.session_state.get("selected_categories", []),
+            key="selected_categories",
+        )
     with f3:
-        selected_customers = st.multiselect("Customer", sorted(df[CONFIG["customer"]].dropna().astype(str).unique()))
+        st.multiselect(
+            "Customer", sorted(df[CONFIG["customer"]].dropna().astype(str).unique()),
+            default=st.session_state.get("selected_customers", []),
+            key="selected_customers",
+        )
 
     f4, f5, f6 = st.columns(3)
     optional_filters = [("channel", "Channel", f4), ("zone", "Zone", f5), ("name", "Name", f6)]
-    selected_optional = {}
     for key, label, col in optional_filters:
         cname = CONFIG[key]
         with col:
             if cname in df.columns:
-                selected_optional[cname] = st.multiselect(label, sorted(df[cname].dropna().astype(str).unique()))
+                st.multiselect(
+                    label,
+                    sorted(df[cname].dropna().astype(str).unique()),
+                    default=st.session_state.get(f"selected_{key}", []),
+                    key=f"selected_{key}",
+                )
             else:
                 st.caption(f"_{label} column not found — filter unavailable._")
-
 
 tab_mom, tab_customer, tab_category = st.tabs(["📈 MOM Overview", "🏪 Customer Wise", "📦 Category Wise"])
 
