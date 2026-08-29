@@ -274,7 +274,7 @@ if not order_url:
 
 top_l, top_r = st.columns([5, 1])
 with top_r:
-    if st.button("🔄 Refresh Now", use_container_width=True):
+    if st.button("🔄 Refresh Now", width="stretch"):
         load_order_df.clear(); load_items_df.clear(); build_product_frame.clear()
         st.rerun()
 
@@ -387,14 +387,22 @@ def render_table(rows_df, key_suffix, is_final_level):
 
     display = view.sort_values("order_qty", ascending=False)[show_cols].reset_index(drop=True)
     keys_in_order = view.sort_values("order_qty", ascending=False)["__key"].reset_index(drop=True)
+    names_in_order = view.sort_values("order_qty", ascending=False)["Name"].reset_index(drop=True)
 
-    event = st.dataframe(
-        display, use_container_width=True, hide_index=True, height=min(520, 60 + 36 * len(display)),
-        on_select="rerun", selection_mode="single-row", key=f"tbl_{key_suffix}",
-    )
-    if event and event.selection and event.selection["rows"]:
-        idx = event.selection["rows"][0]
-        return keys_in_order.iloc[idx], display.iloc[idx]["Name"]
+    st.dataframe(display, width="stretch", hide_index=True, height=min(520, 60 + 36 * len(display)))
+
+    verb = "Open order detail for" if is_final_level else "Drill into"
+    pick_col, btn_col = st.columns([5, 1])
+    with pick_col:
+        choice = st.selectbox(
+            verb, ["Select…"] + names_in_order.tolist(),
+            key=f"pick_{key_suffix}", label_visibility="collapsed",
+        )
+    with btn_col:
+        go = st.button("Go →", key=f"go_{key_suffix}", width="stretch")
+    if go and choice != "Select…":
+        idx = names_in_order[names_in_order == choice].index[0]
+        return keys_in_order.iloc[idx], choice
     return None, None
 
 
@@ -446,7 +454,16 @@ else:
                               CONFIG["order_qty"], CONFIG["order_value"], CONFIG["invoice_qty"], CONFIG["invoice_value"], CONFIG["sale_loss"], "Month"]
                 present = [resolve_col(c, rows.columns) or c for c in wanted]
                 present = [c for c in present if c in rows.columns]
-                st.dataframe(rows[present], use_container_width=True, hide_index=True, height=min(560, 60 + 36 * len(rows)))
+                display_rows = rows[present].copy()
+                for c in display_rows.columns:
+                    if display_rows[c].dtype == "object":
+                        # Mixed int/text within one column (e.g. an AWB
+                        # number stored as text in some rows, a number in
+                        # others) breaks Arrow serialization. Stringify
+                        # defensively rather than rely on Streamlit's
+                        # automatic-fix fallback.
+                        display_rows[c] = display_rows[c].apply(lambda v: "" if pd.isna(v) else str(v))
+                st.dataframe(display_rows, width="stretch", hide_index=True, height=min(560, 60 + 36 * len(rows)))
 
             show_final()
 
