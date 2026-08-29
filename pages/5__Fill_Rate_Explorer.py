@@ -195,8 +195,9 @@ def build_product_frame(order_df, items_df):
 # qty/value columns" once you hand it the right column names.
 # ================================================================
 def summarize_by(df, group_col, id_col, qty_o, qty_i, val_o, val_i, label_col=None, sale_loss_col=None):
+    empty_cols = ["__key", "__label", "orders", "order_qty", "invoice_qty", "fr", "order_value", "invoice_value", "sale_loss", "pending_qty"]
     if df.empty or group_col not in df.columns:
-        return pd.DataFrame(columns=["__key", "Name", "orders", "order_qty", "invoice_qty", "fr", "order_value", "invoice_value", "sale_loss"])
+        return pd.DataFrame(columns=empty_cols)
     agg = {"orders": (id_col, "nunique"), "order_qty": (qty_o, "sum"), "invoice_qty": (qty_i, "sum")}
     if val_o in df.columns and val_i in df.columns:
         agg["order_value"] = (val_o, "sum")
@@ -207,12 +208,16 @@ def summarize_by(df, group_col, id_col, qty_o, qty_i, val_o, val_i, label_col=No
     g["fr"] = np.where(g.order_qty != 0, g.invoice_qty / g.order_qty * 100, np.nan)
     if "order_value" in g.columns and "sale_loss" not in g.columns:
         g["sale_loss"] = g["order_value"] - g["invoice_value"]  # computed proxy, flagged in the UI
+    # __label is a display name derived from the group column (or a
+    # separate label_col, e.g. Description for products) — kept under
+    # its own name so it can never collide with a real column even
+    # when, as with Chain, CONFIG["name"] literally equals "Name".
     if label_col:
         labels = df.groupby(group_col)[label_col].first()
-        g["Name"] = g[group_col].map(labels)
+        g["__label"] = g[group_col].map(labels)
     else:
-        g["Name"] = g[group_col].astype(str)
-    g["Name"] = g["Name"].fillna("Blank / Not Available").astype(str)
+        g["__label"] = g[group_col].astype(str)
+    g["__label"] = g["__label"].fillna("Blank / Not Available").astype(str)
     g["pending_qty"] = g.order_qty - g.invoice_qty
     return g.rename(columns={group_col: "__key"})
 
@@ -363,6 +368,7 @@ def render_table(rows_df, key_suffix, is_final_level):
     cols = st.session_state["explorer_cols"]
 
     view = rows_df.copy()
+    view["Name"] = view["__label"]
     view["Fill Rate"] = view["fr"].map(fmt_pct)
     view["Status"] = view["fr"].map(lambda v: status_for(v)[0])
     view["Order Qty"] = view["order_qty"].map(fmt_num)
